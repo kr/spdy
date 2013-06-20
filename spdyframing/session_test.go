@@ -73,6 +73,63 @@ var sessionTests = []struct {
 		},
 		werr: nil,
 	},
+	{
+		handler: echoHandler,
+		frames: []Frame{
+			&SettingsFrame{
+				FlagIdValues: []SettingsFlagIdValue{
+					{0, SettingsInitialWindowSize, 1},
+				},
+			},
+			nil,
+
+			&SynStreamFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&SynReplyFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&DataFrame{
+				StreamId: 1,
+				Flags:    DataFlagFin,
+				Data:     []byte{0, 1, 2},
+			},
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 3,
+			},
+			nil,
+			&DataFrame{
+				StreamId: 1,
+				Data:     []byte{0},
+			},
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 1,
+			},
+			&DataFrame{
+				StreamId: 1,
+				Data:     []byte{1},
+			},
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 1,
+			},
+			&DataFrame{
+				StreamId: 1,
+				Data:     []byte{2},
+			},
+			nil,
+			&DataFrame{
+				StreamId: 1,
+				Flags:    DataFlagFin,
+				Data:     []byte{},
+			},
+		},
+		werr: nil,
+	},
 }
 
 func failHandler(t *testing.T, st *Stream) {

@@ -116,7 +116,8 @@ func (s *Session) handleRead(f Frame) error {
 		s.handleSynStream(f)
 	//case *SynReplyFrame:
 	//case *RstStreamFrame:
-	//case *SettingsFrame:
+	case *SettingsFrame:
+		s.handleSettings(f)
 	//case *PingFrame:
 	//case *GoAwayFrame:
 	//case *HeadersFrame:
@@ -129,6 +130,21 @@ func (s *Session) handleRead(f Frame) error {
 		log.Println("spdy: ignoring unhandled frame:", f)
 	}
 	return nil
+}
+
+func (s *Session) handleSettings(f *SettingsFrame) {
+	for _, v := range f.FlagIdValues {
+		s.set(v.Id, v.Value)
+	}
+}
+
+func (s *Session) set(id SettingsId, val uint32) {
+	switch id {
+	case SettingsInitialWindowSize:
+		if val < 1<<31 {
+			s.initwnd = int32(val)
+		}
+	}
 }
 
 func (s *Session) handleSynStream(f *SynStreamFrame) {
@@ -342,10 +358,20 @@ func (s *Stream) updateWindow(delta int) error {
 	})
 }
 
-// Write writes bytes from p as the contents of a DATA frame.
+// Write writes p as the contents of one or more DATA frames.
 // It is an error to call Write before calling Reply on a stream
 // initiated by the remote endpoint.
 func (s *Stream) Write(p []byte) (n int, err error) {
+	var c int
+	for n < len(p) && err == nil {
+		c, err = s.writeOnce(p[n:])
+		n += c
+	}
+	return n, err
+}
+
+// writeOnce writes bytes from p as the contents of a single DATA frame.
+func (s *Stream) writeOnce(p []byte) (n int, err error) {
 	if !s.writable {
 		return 0, errNotWritable
 	}
@@ -363,13 +389,7 @@ func (s *Stream) Write(p []byte) (n int, err error) {
 	s.wndSize -= int32(len(p))
 	s.wszCond.L.Unlock()
 
-	f := &DataFrame{
-		StreamId: s.id,
-		Data:     p,
-	}
-	f.Data = make([]byte, len(p))
-	copy(f.Data, p)
-	err = s.writeFrame(f)
+	err = s.writeFrame(&DataFrame{StreamId: s.id, Data: p})
 	if err != nil {
 		return 0, err
 	}
