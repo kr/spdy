@@ -9,14 +9,14 @@ import (
 )
 
 var sessionTests = []struct {
-	handler func(*testing.T, *Stream)
-	frames  []Frame // even index means client->server; odd the reverse
-	werr    error   // wanted return value from Session.Serve
+	handler     func(*testing.T, *Stream) error
+	frames      []Frame // even index means client->server; odd the reverse
+	wServeErr   error   // wanted return value from Session.Serve
+	wHandlerErr []bool  // wanted errors from handler
 }{
 	{
 		handler: failHandler,
 		frames:  []Frame{},
-		werr:    nil,
 	},
 	{
 		handler: echoHandler,
@@ -37,7 +37,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
-		werr: nil,
+		wHandlerErr: []bool{false},
 	},
 	{
 		handler: echoHandler,
@@ -71,7 +71,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
-		werr: nil,
+		wHandlerErr: []bool{false},
 	},
 	{
 		handler: echoHandler,
@@ -128,7 +128,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
-		werr: nil,
+		wHandlerErr: []bool{false},
 	},
 	{
 		handler: failHandler,
@@ -136,39 +136,61 @@ var sessionTests = []struct {
 			&PingFrame{Id: 1},
 			&PingFrame{Id: 1},
 		},
-		werr: nil,
+	},
+	{
+		handler: echoHandler,
+		frames: []Frame{
+			&SynStreamFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&SynReplyFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 1<<31 + 1, // invalid
+			},
+			&RstStreamFrame{
+				StreamId: 1,
+				Status:   FlowControlError,
+			},
+		},
+		wHandlerErr: []bool{true},
 	},
 }
 
-func failHandler(t *testing.T, st *Stream) {
-	t.Error("handler called")
+func failHandler(t *testing.T, st *Stream) error {
+	t.Fatal("handler called")
+	return nil
 }
 
-func echoHandler(t *testing.T, st *Stream) {
+func echoHandler(t *testing.T, st *Stream) error {
 	err := st.Reply(st.Header, 0)
 	if err != nil {
-		t.Error("Reply:", err)
-		return
+		return fmt.Errorf("Reply: %v", err)
 	}
 	_, err = io.Copy(st, st)
 	if err != nil {
-		t.Error("Copy:", err)
-		return
+		return fmt.Errorf("Copy: %v", err)
 	}
 	err = st.Close()
 	if err != nil {
-		t.Error("Close:", err)
+		return fmt.Errorf("Close: %v", err)
 	}
+	return nil
 }
 
 func TestSessionServe(t *testing.T) {
 	for i, tt := range sessionTests {
 		c, s := pipeConn()
+		hErr := make(chan error, 100)
 		sess := &Session{
 			Conn:    s,
-			Handler: func(st *Stream) { tt.handler(t, st) },
+			Handler: func(st *Stream) { hErr <- tt.handler(t, st) },
 		}
-		errCh := make(chan error, 1)
+		errCh := make(chan error)
 		go func() { errCh <- sess.Serve() }()
 
 		fr, err := NewFramer(c, c)
@@ -196,8 +218,17 @@ func TestSessionServe(t *testing.T) {
 			}
 		}
 		c.Close()
-		if err := <-errCh; err != tt.werr {
-			t.Errorf("#%d: Serve err = %v want %v", i, err, tt.werr)
+		if err := <-errCh; err != tt.wServeErr {
+			t.Errorf("#%d: Serve err = %v want %v", i, err, tt.wServeErr)
+		}
+		for j, w := range tt.wHandlerErr {
+			if g := <-hErr; (g != nil) != w {
+				s := "nil"
+				if w {
+					s = "err"
+				}
+				t.Errorf("#%d: handler err %d = %v want %v", i, j, g, s)
+			}
 		}
 	}
 }
