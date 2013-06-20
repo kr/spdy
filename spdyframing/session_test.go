@@ -131,7 +131,7 @@ var sessionTests = []struct {
 		werr: nil,
 	},
 	{
-		handler: echoHandler,
+		handler: failHandler,
 		frames: []Frame{
 			&PingFrame{Id: 1},
 			&PingFrame{Id: 1},
