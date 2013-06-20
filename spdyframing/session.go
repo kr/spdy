@@ -118,7 +118,8 @@ func (s *Session) handleRead(f Frame) error {
 	//case *RstStreamFrame:
 	case *SettingsFrame:
 		s.handleSettings(f)
-	//case *PingFrame:
+	case *PingFrame:
+		return s.writeFrame(f)
 	//case *GoAwayFrame:
 	//case *HeadersFrame:
 	case *WindowUpdateFrame:

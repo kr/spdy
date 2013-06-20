@@ -130,6 +130,14 @@ var sessionTests = []struct {
 		},
 		werr: nil,
 	},
+	{
+		handler: echoHandler,
+		frames: []Frame{
+			&PingFrame{Id: 1},
+			&PingFrame{Id: 1},
+		},
+		werr: nil,
+	},
 }
 
 func failHandler(t *testing.T, st *Stream) {
