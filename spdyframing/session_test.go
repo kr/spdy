@@ -159,6 +159,33 @@ var sessionTests = []struct {
 		},
 		wHandlerErr: []bool{true},
 	},
+	{
+		handler: echoHandler,
+		frames: []Frame{
+			&SynStreamFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&SynReplyFrame{
+				StreamId: 1,
+				Headers:  http.Header{"X": {"y"}},
+			},
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 1<<31 - 1, // valid
+			},
+			nil,
+			&WindowUpdateFrame{
+				StreamId:        1,
+				DeltaWindowSize: 1<<31 - 1, // valid, but total invalid
+			},
+			&RstStreamFrame{
+				StreamId: 1,
+				Status:   FlowControlError,
+			},
+		},
+		wHandlerErr: []bool{true},
+	},
 }
 
 func failHandler(t *testing.T, st *Stream) error {
