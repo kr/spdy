@@ -3,6 +3,7 @@ package spdyframing
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"reflect"
 	"testing"
@@ -11,7 +12,7 @@ import (
 var sessionTests = []struct {
 	handler     func(*testing.T, *Stream) error
 	frames      []Frame // even index means client->server; odd the reverse
-	wServeErr   error   // wanted return value from Session.Serve
+	wRunErr     error   // wanted return value from Session.Run
 	wHandlerErr []bool  // wanted errors from handler
 }{
 	{
@@ -194,7 +195,7 @@ func failHandler(t *testing.T, st *Stream) error {
 }
 
 func echoHandler(t *testing.T, st *Stream) error {
-	err := st.Reply(st.Header, 0)
+	err := st.Reply(st.Header(), 0)
 	if err != nil {
 		return fmt.Errorf("Reply: %v", err)
 	}
@@ -209,22 +210,16 @@ func echoHandler(t *testing.T, st *Stream) error {
 	return nil
 }
 
-func TestSessionServe(t *testing.T) {
+func TestSessionServer(t *testing.T) {
 	for i, tt := range sessionTests {
 		c, s := pipeConn()
 		hErr := make(chan error, 100)
-		sess := &Session{
-			Conn:    s,
-			Handler: func(st *Stream) { hErr <- tt.handler(t, st) },
-		}
+		handler := func(st *Stream) { hErr <- tt.handler(t, st) }
+		sess := NewSession(s, true)
 		errCh := make(chan error)
-		go func() { errCh <- sess.Serve() }()
+		go func() { errCh <- sess.Run(handler) }()
 
-		fr, err := NewFramer(c, c)
-		if err != nil {
-			t.Errorf("#%d: NewFramer: %v", i, err)
-			return
-		}
+		fr := NewFramer(c, c)
 		for j, f := range tt.frames {
 			if f == nil {
 				continue
@@ -245,8 +240,8 @@ func TestSessionServe(t *testing.T) {
 			}
 		}
 		c.Close()
-		if err := <-errCh; err != tt.wServeErr {
-			t.Errorf("#%d: Serve err = %v want %v", i, err, tt.wServeErr)
+		if err := <-errCh; err != tt.wRunErr {
+			t.Errorf("#%d: Run err = %v want %v", i, err, tt.wRunErr)
 		}
 		for j, w := range tt.wHandlerErr {
 			if g := <-hErr; (g != nil) != w {
@@ -257,6 +252,154 @@ func TestSessionServe(t *testing.T) {
 				t.Errorf("#%d: handler err %d = %v want %v", i, j, g, s)
 			}
 		}
+	}
+}
+
+func TestSessionClient(t *testing.T) {
+	got := make(chan []Frame, 1)
+	want := []Frame{
+		&SynStreamFrame{StreamId: 1, Headers: http.Header{"X": {"y"}}},
+		&DataFrame{StreamId: 1, Data: []byte("foo")},
+		&DataFrame{StreamId: 1, Data: []byte{}, Flags: DataFlagFin},
+		// The client also sends a WindowUpdateFrame here, but the test
+		// harness server doesn't stick around long enough to read it.
+	}
+
+	reply := []Frame{
+		&SynReplyFrame{StreamId: 1, Headers: http.Header{"X": {"y"}}},
+		&DataFrame{StreamId: 1, Data: []byte("foo")},
+		&DataFrame{StreamId: 1, Data: []byte{}, Flags: DataFlagFin},
+	}
+
+	cpipe, spipe := pipeConn()
+	defer cpipe.Close()
+	defer spipe.Close()
+	fr := NewFramer(spipe, spipe)
+	go func() {
+		var fs []Frame
+		f, err := fr.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fs = append(fs, f)
+		for {
+			f, err := fr.ReadFrame()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fs = append(fs, f)
+			if f, ok := f.(*DataFrame); ok && f.Flags&DataFlagFin != 0 {
+				got <- fs
+				break
+			}
+		}
+		go io.Copy(ioutil.Discard, spipe)
+		for _, f := range reply {
+			err := fr.WriteFrame(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}()
+	sess := NewSession(cpipe, false)
+	go sess.Run(func(st *Stream) { failHandler(t, st) })
+	h := http.Header{"X": {"y"}}
+	st, err := sess.Open(h, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const p = "foo"
+	_, err = io.WriteString(st, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh := st.Header(); !reflect.DeepEqual(gh, h) {
+		t.Fatalf("gh = %+v want %+v", gh, h)
+	}
+	b, err := ioutil.ReadAll(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != string(b) {
+		t.Fatalf("b = %q want %q", string(b), p)
+	}
+	gfs := <-got
+	if len(gfs) != len(want) {
+		t.Fatalf("frames = %+v want %+v", gfs, want)
+	}
+	for i := range gfs {
+		pubdiff(t, "", gfs[i], want[i])
+	}
+}
+
+func TestSessionUnidirectional(t *testing.T) {
+	var flags ControlFlags = ControlFlagUnidirectional
+	got := make(chan []Frame, 1)
+	want := []Frame{
+		&SynStreamFrame{
+			StreamId: 1,
+			CFHeader: ControlFrameHeader{Flags: flags},
+			Headers:  http.Header{"X": {"y"}},
+		},
+		&DataFrame{StreamId: 1, Data: []byte("foo")},
+		&DataFrame{StreamId: 1, Data: []byte{}, Flags: DataFlagFin},
+	}
+	cpipe, spipe := pipeConn()
+	defer cpipe.Close()
+	defer spipe.Close()
+	fr := NewFramer(spipe, spipe)
+	go func() {
+		var fs []Frame
+		f, err := fr.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fs = append(fs, f)
+		for {
+			f, err := fr.ReadFrame()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fs = append(fs, f)
+			if f, ok := f.(*DataFrame); ok && f.Flags&DataFlagFin != 0 {
+				got <- fs
+				break
+			}
+		}
+		io.Copy(ioutil.Discard, spipe)
+	}()
+	sess := NewSession(cpipe, false)
+	go sess.Run(func(st *Stream) { failHandler(t, st) })
+	st, err := sess.Open(http.Header{"X": {"y"}}, flags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh := st.Header(); gh != nil {
+		t.Fatalf("Header = %+v want nil", gh)
+	}
+	const p = "foo"
+	_, err = io.WriteString(st, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ioutil.ReadAll(st)
+	if err == nil {
+		t.Fatal("err = nil want not readable")
+	}
+	gfs := <-got
+	if len(gfs) != len(want) {
+		t.Fatalf("frames = %+v want %+v", gfs, want)
+	}
+	for i := range gfs {
+		pubdiff(t, "", gfs[i], want[i])
 	}
 }
 
@@ -284,13 +427,12 @@ func pubdiff(t *testing.T, prefix string, have, want interface{}) {
 }
 
 type side struct {
-	io.ReadCloser
-	io.WriteCloser
+	*io.PipeReader
+	*io.PipeWriter
 }
 
 func (s side) Close() error {
-	s.ReadCloser.Close()
-	s.WriteCloser.Close()
+	s.PipeWriter.CloseWithError(io.EOF)
 	return nil
 }
 

@@ -69,7 +69,7 @@ func TestCreateParseSynStreamFrameCompressionDisable(t *testing.T) {
 
 func TestCreateParseSynStreamFrameCompressionEnable(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
+	framer := NewFramer(buffer, buffer)
 	synStreamFrame := SynStreamFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -77,9 +77,6 @@ func TestCreateParseSynStreamFrameCompressionEnable(t *testing.T) {
 		},
 		StreamId: 2,
 		Headers:  HeadersFixture,
-	}
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
 	}
 	if err := framer.WriteFrame(&synStreamFrame); err != nil {
 		t.Fatal("WriteFrame with compression:", err)
@@ -131,7 +128,7 @@ func TestCreateParseSynReplyFrameCompressionDisable(t *testing.T) {
 
 func TestCreateParseSynReplyFrameCompressionEnable(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
+	framer := NewFramer(buffer, buffer)
 	synReplyFrame := SynReplyFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -139,9 +136,6 @@ func TestCreateParseSynReplyFrameCompressionEnable(t *testing.T) {
 		},
 		StreamId: 2,
 		Headers:  HeadersFixture,
-	}
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
 	}
 	if err := framer.WriteFrame(&synReplyFrame); err != nil {
 		t.Fatal("WriteFrame with compression:", err)
@@ -161,10 +155,7 @@ func TestCreateParseSynReplyFrameCompressionEnable(t *testing.T) {
 
 func TestCreateParseRstStream(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	rstStreamFrame := RstStreamFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -191,10 +182,7 @@ func TestCreateParseRstStream(t *testing.T) {
 
 func TestCreateParseSettings(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	settingsFrame := SettingsFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -223,10 +211,7 @@ func TestCreateParseSettings(t *testing.T) {
 
 func TestCreateParsePing(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	pingFrame := PingFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -258,10 +243,7 @@ func TestCreateParsePing(t *testing.T) {
 
 func TestCreateParseGoAway(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	goAwayFrame := GoAwayFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -341,7 +323,7 @@ func TestCreateParseHeadersFrameCompressionEnable(t *testing.T) {
 	}
 	headersFrame.Headers = HeadersFixture
 
-	framer, err := NewFramer(buffer, buffer)
+	framer := NewFramer(buffer, buffer)
 	if err := framer.WriteFrame(&headersFrame); err != nil {
 		t.Fatal("WriteFrame with compression:", err)
 	}
@@ -360,10 +342,7 @@ func TestCreateParseHeadersFrameCompressionEnable(t *testing.T) {
 
 func TestCreateParseWindowUpdateFrame(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	windowUpdateFrame := WindowUpdateFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -402,10 +381,7 @@ func TestCreateParseWindowUpdateFrame(t *testing.T) {
 
 func TestCreateParseDataFrame(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	dataFrame := DataFrame{
 		StreamId: 1,
 		Data:     []byte{'h', 'e', 'l', 'l', 'o'},
@@ -428,10 +404,7 @@ func TestCreateParseDataFrame(t *testing.T) {
 
 func TestCompressionContextAcrossFrames(t *testing.T) {
 	buffer := new(bytes.Buffer)
-	framer, err := NewFramer(buffer, buffer)
-	if err != nil {
-		t.Fatal("Failed to create new framer:", err)
-	}
+	framer := NewFramer(buffer, buffer)
 	headersFrame := HeadersFrame{
 		CFHeader: ControlFrameHeader{
 			version:   Version,
@@ -489,14 +462,8 @@ func TestMultipleSPDYFrames(t *testing.T) {
 	// Initialize the framers.
 	pr1, pw1 := io.Pipe()
 	pr2, pw2 := io.Pipe()
-	writer, err := NewFramer(pw1, pr2)
-	if err != nil {
-		t.Fatal("Failed to create writer:", err)
-	}
-	reader, err := NewFramer(pw2, pr1)
-	if err != nil {
-		t.Fatal("Failed to create reader:", err)
-	}
+	writer := NewFramer(pw1, pr2)
+	reader := NewFramer(pw2, pr1)
 
 	// Set up the frames we're actually transferring.
 	headersFrame := HeadersFrame{
@@ -565,10 +532,7 @@ func TestReadMalformedZlibHeader(t *testing.T) {
 			t.Errorf("Unable to decode base64 encoded frame %s: %v", name, err)
 		}
 		buf := bytes.NewBuffer(b)
-		reader, err := NewFramer(buf, buf)
-		if err != nil {
-			t.Fatalf("NewFramer: %v", err)
-		}
+		reader := NewFramer(buf, buf)
 		_, err = reader.ReadFrame()
 		if err != zlib.ErrHeader {
 			t.Errorf("Frame %s, expected: %#v, actual: %#v", name, zlib.ErrHeader, err)
@@ -620,10 +584,7 @@ func TestNoZeroStreamId(t *testing.T) {
 			t.Errorf("Unable to decode base64 encoded frame %s: %v", f, err)
 			continue
 		}
-		framer, err := NewFramer(ioutil.Discard, bytes.NewReader(b))
-		if err != nil {
-			t.Fatalf("NewFramer: %v", err)
-		}
+		framer := NewFramer(ioutil.Discard, bytes.NewReader(b))
 		err = framer.WriteFrame(f.frame)
 		checkZeroStreamId(t, name, "WriteFrame", err)
 

@@ -259,17 +259,14 @@ type Framer struct {
 // a io.Writer and io.Reader. Note that Framer will read and write individual fields
 // from/to the Reader and Writer, so the caller should pass in an appropriately
 // buffered implementation to optimize performance.
-func NewFramer(w io.Writer, r io.Reader) (*Framer, error) {
+func NewFramer(w io.Writer, r io.Reader) *Framer {
 	compressBuf := new(bytes.Buffer)
-	compressor, err := zlib.NewWriterLevelDict(compressBuf, zlib.BestCompression, []byte(headerDictionary))
-	if err != nil {
-		return nil, err
-	}
-	framer := &Framer{
+	// The only error from NewWriterLevelDict is out of range compression level.
+	compressor, _ := zlib.NewWriterLevelDict(compressBuf, zlib.BestCompression, []byte(headerDictionary))
+	return &Framer{
 		w:                w,
 		headerBuf:        compressBuf,
 		headerCompressor: compressor,
 		r:                r,
 	}
-	return framer, nil
 }

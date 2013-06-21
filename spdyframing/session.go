@@ -15,7 +15,8 @@ const defaultInitWnd = 64 * 1024
 
 var (
 	errClosed      = errors.New("closed")
-	errReplied     = errors.New("already replied")
+	errNotReadable = errors.New("not readable")
+	errIsWritable  = errors.New("can't reply; already open for writing")
 	errNotWritable = errors.New("not writable; must reply first")
 )
 
@@ -27,46 +28,58 @@ func (e resetError) Error() string {
 
 // Session represents a session in the low-level SPDY framing layer.
 type Session struct {
-	Conn    io.ReadWriteCloser
-	Handler func(*Stream)
+	rwc     io.ReadWriteCloser
+	handler func(*Stream)
 
 	fr         *Framer
 	isServer   bool
 	streams    map[StreamId]*Stream
+	syn        chan *Stream
 	w          chan Frame
 	err        error
 	initwnd    int32
+	nextSynId  StreamId
 	lastRecvId StreamId
 	stopped    chan bool
 }
 
-func (s *Session) init(isServer bool) error {
-	// TODO(kr): buffer s.Conn
-	fr, err := NewFramer(s.Conn, s.Conn)
-	if err != nil {
-		return fmt.Errorf("NewFramer: %v", err)
+// NewSession makes a new session on rwc. If server is true,
+// the session will initiate even-numbered streams and expect
+// odd-numbered streams from the remote endpoint; otherwise
+// the reverse.
+func NewSession(rwc io.ReadWriteCloser, server bool) *Session {
+	s := &Session{
+		rwc:      rwc, // TODO(kr): buffer?
+		isServer: server,
+		fr:       NewFramer(rwc, rwc),
+		initwnd:  defaultInitWnd,
+		streams:  make(map[StreamId]*Stream),
+		syn:      make(chan *Stream),
+		w:        make(chan Frame),
+		stopped:  make(chan bool),
 	}
-	s.fr = fr
-	s.initwnd = defaultInitWnd
-	s.streams = make(map[StreamId]*Stream)
-	s.isServer = isServer
-	s.w = make(chan Frame)
-	s.stopped = make(chan bool)
-	return nil
+	if server {
+		s.nextSynId = 2
+	} else {
+		s.nextSynId = 1
+	}
+	return s
 }
 
-// Serve reads incoming frames on s and calls s.Handler in a
+// Run reads incoming frames on s and calls handler in a
 // separate goroutine for each incoming SPDY stream.
-func (s *Session) Serve() error {
-	if err := s.init(true); err != nil {
-		return fmt.Errorf("spdy: init: %v", err)
-	}
-	defer s.Conn.Close()
+func (s *Session) Run(handler func(*Stream)) error {
+	s.handler = handler
+	defer s.rwc.Close()
 	defer close(s.stopped)
 	defer func() {
 		for _, st := range s.streams {
 			st.rclose(errClosed)
 			st.wclose(errClosed)
+			select {
+			case st.gotReply <- false:
+			default:
+			}
 		}
 	}()
 
@@ -96,6 +109,8 @@ func (s *Session) Serve() error {
 			err = s.handleRead(f)
 		case f := <-s.w:
 			err = s.writeFrame(f)
+		case st := <-s.syn:
+			s.initiate(st)
 		case err = <-errCh:
 		}
 
@@ -114,7 +129,8 @@ func (s *Session) handleRead(f Frame) error {
 	switch f := f.(type) {
 	case *SynStreamFrame:
 		s.handleSynStream(f)
-	//case *SynReplyFrame:
+	case *SynReplyFrame:
+		s.handleSynReply(f)
 	//case *RstStreamFrame:
 	case *SettingsFrame:
 		s.handleSettings(f)
@@ -154,8 +170,8 @@ func (s *Session) handleSynStream(f *SynStreamFrame) {
 		s.resetStream(f.StreamId, ProtocolError)
 	} else {
 		s.lastRecvId = f.StreamId
-		st := s.newStream(f.StreamId)
-		st.Header = f.Headers
+		st := newStream(s, f.StreamId)
+		st.inHeader = f.Headers
 		s.streams[f.StreamId] = st
 		if f.CFHeader.Flags&ControlFlagUnidirectional != 0 {
 			st.wclose(errClosed)
@@ -163,8 +179,32 @@ func (s *Session) handleSynStream(f *SynStreamFrame) {
 		if f.CFHeader.Flags&ControlFlagFin != 0 {
 			st.rclose(io.EOF)
 		}
-		go s.Handler(st)
+		go s.handler(st)
 	}
+}
+
+func (s *Session) handleSynReply(f *SynReplyFrame) {
+	st := s.streams[f.StreamId]
+	if st == nil {
+		s.resetStream(f.StreamId, InvalidStream)
+		return
+	}
+	st.inHeader = f.Headers
+	st.gotReply <- true
+	if f.CFHeader.Flags&ControlFlagFin != 0 {
+		st.rclose(io.EOF)
+	}
+}
+
+func (s *Session) initiate(st *Stream) {
+	st.id = s.nextSynId
+	s.nextSynId += 2
+	s.streams[st.id] = st
+	f := &SynStreamFrame{StreamId: st.id, Headers: st.outHeader}
+	st.setId <- true
+	f.CFHeader.Flags = st.outFlag
+	f.CFHeader.Flags &= ControlFlagUnidirectional | ControlFlagFin
+	s.writeFrame(f)
 }
 
 func (s *Session) handleWindowUpdate(f *WindowUpdateFrame) {
@@ -278,7 +318,66 @@ func (s *Session) resetStream(id StreamId, status RstStreamStatus) error {
 	return s.writeFrame(&RstStreamFrame{StreamId: id, Status: status})
 }
 
-func (sess *Session) newStream(id StreamId) *Stream {
+// Open initiates a new SPDY stream with SYN_STREAM.
+// If ControlFlagUnidirectional is unset, the returned
+// Stream has its Header initialized from the remote
+// endpoint's SYN_REPLY. Control flags that are not valid
+// for SYN_STREAM will be silently ignored.
+func (s *Session) Open(h http.Header, flag ControlFlags) (*Stream, error) {
+	st := newStream(s, 0)
+	st.outHeader = h
+	st.outFlag = flag
+	st.gotReply = make(chan bool, 1)
+	st.wready = true
+	st.setId = make(chan bool, 1)
+	st.needId = true
+	if flag&ControlFlagUnidirectional != 0 {
+		st.rclose(errNotReadable)
+	} else {
+		st.needReply = true
+	}
+	select {
+	case s.syn <- st:
+	case <-s.stopped:
+		return nil, errors.New("session closed")
+	}
+	return st, nil
+}
+
+// Stream represents a stream in the low-level SPDY framing layer.
+type Stream struct {
+	// Incoming header, from either SYN_STREAM or SYN_REPLY.
+	inHeader http.Header
+
+	// TODO(kr): unimplemented
+	// Trailer will be filled in by HEADERS frames received during
+	// the stream. Once the stream is closed or half-closed for
+	// receiving, Trailer is complete and won't be written to
+	// again.
+	//Trailer http.Header
+
+	outHeader http.Header // outgoing SYN_STREAM
+	outFlag   ControlFlags
+	gotReply  chan bool
+	needReply bool
+	setId     chan bool
+	needId    bool
+
+	id      StreamId
+	sess    *Session
+	buf     buffer // incoming data
+	bufCond *sync.Cond
+	wready  bool
+	rclosed bool
+	wclosed bool
+	rErr    error
+	wErr    error
+	wndSize int32 // send window size
+	wszCond *sync.Cond
+	wstop   chan bool
+}
+
+func newStream(sess *Session, id StreamId) *Stream {
 	s := &Stream{
 		id:      id,
 		sess:    sess,
@@ -291,30 +390,15 @@ func (sess *Session) newStream(id StreamId) *Stream {
 	return s
 }
 
-// Stream represents a stream in the low-level SPDY framing layer.
-type Stream struct {
-	// Incoming header, from either SYN_STREAM or SYN_REPLY.
-	Header http.Header
-
-	// TODO(kr): unimplemented
-	// Trailer will be filled in by HEADERS frames received during
-	// the stream. Once the stream is closed or half-closed for
-	// receiving, Trailer is complete and won't be written to
-	// again.
-	//Trailer http.Header
-
-	id       StreamId
-	sess     *Session
-	buf      buffer // incoming data
-	bufCond  *sync.Cond
-	writable bool
-	rclosed  bool
-	wclosed  bool
-	rErr     error
-	wErr     error
-	wndSize  int32 // send window size
-	wszCond  *sync.Cond
-	wstop    chan bool
+// Incoming header, from either SYN_STREAM or SYN_REPLY.
+// Returns nil if there is no incoming direction (either
+// because s is unidirectional, or because of an error).
+func (s *Stream) Header() http.Header {
+	if s.needReply {
+		<-s.gotReply
+		s.needReply = false
+	}
+	return s.inHeader
 }
 
 // Reply sends SYN_REPLY with header fields from h.
@@ -322,10 +406,10 @@ type Stream struct {
 // TODO(kr): also an error to call reply on a stream initiated by
 // this side.
 func (s *Stream) Reply(h http.Header, flag ControlFlags) error {
-	if s.writable {
-		return errReplied
+	if s.wready {
+		return errIsWritable
 	}
-	s.writable = true
+	s.wready = true
 	f := &SynReplyFrame{
 		StreamId: s.id,
 		Headers:  h,
@@ -341,6 +425,8 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 		s.bufCond.Wait()
 	}
 	n, err = s.buf.Read(p)
+	if err != nil {
+	}
 	s.bufCond.L.Unlock()
 	s.updateWindow(n)
 	if err == io.EOF {
@@ -373,7 +459,7 @@ func (s *Stream) Write(p []byte) (n int, err error) {
 
 // writeOnce writes bytes from p as the contents of a single DATA frame.
 func (s *Stream) writeOnce(p []byte) (n int, err error) {
-	if !s.writable {
+	if !s.wready {
 		return 0, errNotWritable
 	}
 	s.wszCond.L.Lock()
@@ -390,6 +476,10 @@ func (s *Stream) writeOnce(p []byte) (n int, err error) {
 	s.wndSize -= int32(len(p))
 	s.wszCond.L.Unlock()
 
+	if s.needId {
+		<-s.setId
+		s.needId = false
+	}
 	err = s.writeFrame(&DataFrame{StreamId: s.id, Data: p})
 	if err != nil {
 		return 0, err
