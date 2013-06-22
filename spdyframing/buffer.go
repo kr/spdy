@@ -15,6 +15,10 @@ type buffer struct {
 
 var _ io.ReadWriteCloser = (*buffer)(nil)
 
+var (
+	errReadEmpty = errors.New("read from empty buffer")
+)
+
 // Read copies bytes from the buffer into p.
 // It is an error to read when no data is available.
 func (b *buffer) Read(p []byte) (n int, err error) {
@@ -22,8 +26,8 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	b.r += n
 	if b.closed && b.r == b.w {
 		err = io.EOF
-	} else if b.r == b.w {
-		err = errors.New("read from empty buffer")
+	} else if b.r == b.w && n == 0 {
+		err = errReadEmpty
 	}
 	return n, err
 }
