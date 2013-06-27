@@ -30,7 +30,7 @@ func ListenAndServeTLS(addr, certFile, keyFile string, h http.Handler) error {
 // instead.
 func ServeConn(s *http.Server, c *tls.Conn, h http.Handler) {
 	f := func(st *framing.Stream) {
-		c := &conn{
+		c := &request{
 			remoteAddr: c.RemoteAddr().String(),
 			handler:    h,
 			stream:     st,
@@ -43,15 +43,14 @@ func ServeConn(s *http.Server, c *tls.Conn, h http.Handler) {
 	}
 }
 
-type conn struct {
+type request struct {
 	remoteAddr string
 	handler    http.Handler
 	stream     *framing.Stream
 }
 
-// Serve a new connection. Each conn corresponds to a single SPDY
-// stream, which means only a single HTTP request.
-func (c *conn) serve() {
+// The server side of an http-over-spdy request.
+func (c *request) serve() {
 	// TODO(kr): recover
 	// TODO(kr): buffered reader and writer
 	w, err := c.readRequest()
@@ -70,7 +69,7 @@ func (c *conn) serve() {
 	w.finishRequest()
 }
 
-func (c *conn) readRequest() (w *response, err error) {
+func (c *request) readRequest() (w *response, err error) {
 	req, err := ReadRequest(
 		c.stream.Header(),
 		nil,
@@ -82,13 +81,13 @@ func (c *conn) readRequest() (w *response, err error) {
 	req.RemoteAddr = c.remoteAddr
 	w = new(response)
 	w.header = make(http.Header)
-	w.conn = c
+	w.stream = c.stream
 	w.req = req
 	return w, nil
 }
 
 type response struct {
-	conn        *conn
+	stream      *framing.Stream
 	req         *http.Request
 	header      http.Header
 	wroteHeader bool
@@ -100,7 +99,7 @@ func (w *response) Write(p []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	// TODO(kr): sniff
-	return w.conn.stream.Write(p)
+	return w.stream.Write(p)
 }
 
 func (w *response) WriteHeader(code int) {
@@ -144,10 +143,10 @@ func (w *response) writeHeader(code int, fin bool) {
 	if fin {
 		flag |= framing.ControlFlagFin
 	}
-	err := w.conn.stream.Reply(h, flag)
+	err := w.stream.Reply(h, flag)
 	if err != nil {
 		log.Println("spdy:", err)
-		w.conn.stream.Reset(framing.InternalError)
+		w.stream.Reset(framing.InternalError)
 	}
 }
 
@@ -164,7 +163,7 @@ func (w *response) finishRequest() {
 		return
 	}
 	// TODO(kr): sniff
-	err := w.conn.stream.Close()
+	err := w.stream.Close()
 	if err != nil {
 		log.Println("spdy:", err)
 	}
