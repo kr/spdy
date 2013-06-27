@@ -402,9 +402,9 @@ func (s *Stream) Header() http.Header {
 }
 
 // Reply sends SYN_REPLY with header fields from h.
-// It is an error to call Reply twice.
-// TODO(kr): also an error to call reply on a stream initiated by
-// this side.
+// It is an error to call Reply on a stream that is
+// writable. Writeable streams are those initiated
+// by the local endpoint or already replied.
 func (s *Stream) Reply(h http.Header, flag ControlFlags) error {
 	if s.wready {
 		return errIsWritable
