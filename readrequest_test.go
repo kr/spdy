@@ -327,6 +327,18 @@ func TestNewRequest(t *testing.T) {
 	}
 }
 
+func TestFramingHeader(t *testing.T) {
+	for i, tt := range reqTests {
+		if tt.Req != nil {
+			g := FramingHeader(tt.Req)
+			w := tt.RawHeader
+			if !reflect.DeepEqual(g, w) {
+				t.Errorf("#%d: RawHeader = %v want %v", i, g, w)
+			}
+		}
+	}
+}
+
 func diff(t *testing.T, prefix string, have, want interface{}) {
 	hv := reflect.ValueOf(have).Elem()
 	wv := reflect.ValueOf(want).Elem()

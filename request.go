@@ -68,6 +68,20 @@ func ReadRequest(h, t http.Header, r io.Reader) (*http.Request, error) {
 	return req, nil
 }
 
+// FramingHeader copies r into a header suitable for use in the SPDY framing
+// layer. It includes the SPDY-specific ':' fields such as :scheme, :method,
+// and :version.
+func FramingHeader(r *http.Request) http.Header {
+	h := make(http.Header)
+	copyHeader(h, r.Header)
+	h.Set(":scheme", r.URL.Scheme)
+	h.Set(":host", r.URL.Host)
+	h.Set(":method", r.Method)
+	h.Set(":path", r.URL.Path)
+	h.Set(":version", r.Proto)
+	return h
+}
+
 // body turns a Reader into a ReadCloser.
 // Close ensures that the body has been fully read
 // and then copies the trailer if necessary.
