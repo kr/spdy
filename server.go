@@ -37,8 +37,7 @@ func ServeConn(s *http.Server, c *tls.Conn, h http.Handler) {
 		}
 		c.serve()
 	}
-	sess := &framing.Session{Conn: c, Handler: f}
-	err := sess.Serve()
+	err := framing.NewSession(c, true).Run(f)
 	if err != nil {
 		log.Println("spdy:", err)
 	}
@@ -73,7 +72,7 @@ func (c *conn) serve() {
 
 func (c *conn) readRequest() (w *response, err error) {
 	req, err := ReadRequest(
-		c.stream.Header,
+		c.stream.Header(),
 		nil,
 		c.stream, // TODO(kr): buffer
 	)
