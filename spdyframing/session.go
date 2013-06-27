@@ -319,10 +319,7 @@ func (s *Session) resetStream(id StreamId, status RstStreamStatus) error {
 }
 
 // Open initiates a new SPDY stream with SYN_STREAM.
-// If ControlFlagUnidirectional is unset, the returned
-// Stream has its Header initialized from the remote
-// endpoint's SYN_REPLY. Control flags that are not valid
-// for SYN_STREAM will be silently ignored.
+// Flags invalid for SYN_STREAM will be silently ignored.
 func (s *Session) Open(h http.Header, flag ControlFlags) (*Stream, error) {
 	st := newStream(s, 0)
 	st.outHeader = h
