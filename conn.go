@@ -27,11 +27,11 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 		})
 	})
 	reqHeader, flag, err := RequestFramingHeader(r)
-	body := r.Body
-	r.Body = nil
 	if err != nil {
 		return nil, err
 	}
+	body := r.Body
+	r.Body = nil
 	st, err := c.s.Open(reqHeader, flag)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 			st.Close()
 		}()
 	}
-	h := st.Header() // waits for SYN_REPLY
+	h := st.Header() // wait for SYN_REPLY
 	resp, err := ReadResponse(h, nil, st, r)
 	if err != nil {
 		st.Reset(framing.ProtocolError)
