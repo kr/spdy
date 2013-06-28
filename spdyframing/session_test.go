@@ -139,6 +139,13 @@ var sessionTests = []struct {
 		},
 	},
 	{
+		handler: failHandler,
+		frames: []Frame{
+			&DataFrame{StreamId: 1, Flags: DataFlagFin},
+			&RstStreamFrame{StreamId: 1, Status: InvalidStream},
+		},
+	},
+	{
 		handler: echoHandler,
 		frames: []Frame{
 			&SynStreamFrame{

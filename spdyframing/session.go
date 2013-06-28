@@ -263,8 +263,10 @@ func (s *Session) writeFrame(f Frame) error {
 		fin = f.CFHeader.Flags&ControlFlagFin != 0
 	case *RstStreamFrame:
 		st = s.streams[f.StreamId]
-		st.rclose(resetError(f.Status))
-		st.wclose(resetError(f.Status))
+		if st != nil {
+			st.rclose(resetError(f.Status))
+			st.wclose(resetError(f.Status))
+		}
 	//case *SettingsFrame:
 	//case *PingFrame:
 	//case *GoAwayFrame:
