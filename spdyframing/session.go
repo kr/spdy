@@ -43,33 +43,32 @@ type Session struct {
 	stopped    chan bool
 }
 
-// NewSession makes a new session on rwc. If server is true,
-// the session will initiate even-numbered streams and expect
-// odd-numbered streams from the remote endpoint; otherwise
-// the reverse.
-func NewSession(rwc io.ReadWriteCloser, server bool) *Session {
-	s := &Session{
-		rwc:      rwc, // TODO(kr): buffer?
-		isServer: server,
-		fr:       NewFramer(rwc, rwc),
-		initwnd:  defaultInitWnd,
-		streams:  make(map[StreamId]*Stream),
-		syn:      make(chan *Stream),
-		w:        make(chan Frame),
-		stopped:  make(chan bool),
+// NewSession makes a new session on rwc.
+func NewSession(rwc io.ReadWriteCloser) *Session {
+	return &Session{
+		rwc:     rwc, // TODO(kr): buffer?
+		fr:      NewFramer(rwc, rwc),
+		initwnd: defaultInitWnd,
+		streams: make(map[StreamId]*Stream),
+		syn:     make(chan *Stream),
+		w:       make(chan Frame),
+		stopped: make(chan bool),
 	}
+}
+
+// Run reads and writes frames on s.
+// If server is true, the session will initiate even-numbered
+// streams and expect odd-numbered streams from the remote
+// endpoint; otherwise the reverse. It calls f in a separate
+// goroutine for each incoming SPDY stream.
+func (s *Session) Run(server bool, f func(*Stream)) error {
+	s.isServer = server
+	s.handler = f
 	if server {
 		s.nextSynId = 2
 	} else {
 		s.nextSynId = 1
 	}
-	return s
-}
-
-// Run reads incoming frames on s and calls handler in a
-// separate goroutine for each incoming SPDY stream.
-func (s *Session) Run(handler func(*Stream)) error {
-	s.handler = handler
 	defer s.rwc.Close()
 	defer close(s.stopped)
 	defer func() {

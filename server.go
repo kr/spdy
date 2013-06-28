@@ -30,19 +30,20 @@ func ListenAndServeTLS(addr, certFile, keyFile string, h http.Handler) error {
 // instead.
 func ServeConn(s *http.Server, c *tls.Conn, h http.Handler) {
 	f := func(st *framing.Stream) {
-		c := &request{
+		r := &request{
 			remoteAddr: c.RemoteAddr().String(),
 			handler:    h,
 			stream:     st,
 		}
-		c.serve()
+		r.serve()
 	}
-	err := framing.NewSession(c, true).Run(f)
+	err := framing.NewSession(c).Run(true, f)
 	if err != nil {
 		log.Println("spdy:", err)
 	}
 }
 
+// request represents a server request
 type request struct {
 	remoteAddr string
 	handler    http.Handler
@@ -137,7 +138,12 @@ func (w *response) writeHeader(code int, fin bool) {
 
 	h := make(http.Header)
 	copyHeader(h, w.header)
-	h.Set(":status", strconv.Itoa(code))
+	codestring := strconv.Itoa(code)
+	statusText := http.StatusText(code)
+	if statusText == "" {
+		statusText = "status code " + codestring
+	}
+	h.Set(":status", codestring+" "+statusText)
 	h.Set(":version", "HTTP/1.1")
 	var flag framing.ControlFlags
 	if fin {

@@ -222,9 +222,9 @@ func TestSessionServer(t *testing.T) {
 		c, s := pipeConn()
 		hErr := make(chan error, 100)
 		handler := func(st *Stream) { hErr <- tt.handler(t, st) }
-		sess := NewSession(s, true)
+		sess := NewSession(s)
 		errCh := make(chan error)
-		go func() { errCh <- sess.Run(handler) }()
+		go func() { errCh <- sess.Run(true, handler) }()
 
 		fr := NewFramer(c, c)
 		for j, f := range tt.frames {
@@ -308,8 +308,8 @@ func TestSessionClient(t *testing.T) {
 			}
 		}
 	}()
-	sess := NewSession(cpipe, false)
-	go sess.Run(func(st *Stream) { failHandler(t, st) })
+	sess := NewSession(cpipe)
+	go sess.Run(false, func(st *Stream) { failHandler(t, st) })
 	h := http.Header{"X": {"y"}}
 	st, err := sess.Open(h, 0)
 	if err != nil {
@@ -379,8 +379,8 @@ func TestSessionUnidirectional(t *testing.T) {
 		}
 		io.Copy(ioutil.Discard, spipe)
 	}()
-	sess := NewSession(cpipe, false)
-	go sess.Run(func(st *Stream) { failHandler(t, st) })
+	sess := NewSession(cpipe)
+	go sess.Run(false, func(st *Stream) { failHandler(t, st) })
 	st, err := sess.Open(http.Header{"X": {"y"}}, flags)
 	if err != nil {
 		t.Fatal(err)
