@@ -1,4 +1,3 @@
-// Package spdy demultiplexes spdy streams.
 package spdyframing
 
 import (
