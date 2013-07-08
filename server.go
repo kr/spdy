@@ -4,65 +4,78 @@ import (
 	"crypto/tls"
 	framing "github.com/kr/spdy/spdyframing"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 )
 
+type Server struct {
+	http.Server
+}
+
 // ListenAndServeTLS is like http.ListenAndServeTLS,
 // but serves both HTTP and SPDY.
 func ListenAndServeTLS(addr, certFile, keyFile string, h http.Handler) error {
-	s := &http.Server{
-		Addr:    addr,
-		Handler: h,
-		TLSConfig: &tls.Config{
-			NextProtos: []string{"spdy/3"},
-		},
-		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){
-			"spdy/3": ServeConn,
-		},
-	}
+	s := &Server{Server: http.Server{Addr: addr, Handler: h}}
 	return s.ListenAndServeTLS(certFile, keyFile)
 }
 
-// ServeConn is for http.Server.TLSNextProto. It serves SPDY
-// requests on c. If h is nil, http.DefaultHandler is used.
-// Most people don't need this; they should use ListenAndServeTLS
-// instead.
-func ServeConn(s *http.Server, c *tls.Conn, h http.Handler) {
-	f := func(st *framing.Stream) {
-		r := &request{
-			remoteAddr: c.RemoteAddr().String(),
-			handler:    h,
-			stream:     st,
-		}
-		r.serve()
+// ListenAndServeTLS is like http.Server.ListenAndServeTLS,
+// but serves both HTTP and SPDY.
+func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
+	s1 := *s
+	s1.TLSConfig = new(tls.Config)
+	if s.TLSConfig != nil {
+		*s1.TLSConfig = *s.TLSConfig
 	}
-	err := framing.NewSession(c).Run(true, f)
+	if s1.TLSConfig.NextProtos == nil {
+		s1.TLSConfig.NextProtos = []string{"spdy/3", "http/1.1"}
+	}
+	if s1.TLSNextProto == nil {
+		s1.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
+	}
+	if _, ok := s1.TLSNextProto["spdy/3"]; !ok {
+		s1.TLSNextProto["spdy/3"] = s.serveConn
+	}
+	return s1.Server.ListenAndServeTLS(certFile, keyFile)
+}
+
+// Satisfy the signature of s.TLSNextProto.
+func (s *Server) serveConn(hs *http.Server, c *tls.Conn, h http.Handler) {
+	s1 := *s
+	if hs != nil {
+		s1.Server = *hs
+	}
+	if h != nil {
+		s1.Server.Handler = h
+	}
+	err := s1.ServeConn(c)
 	if err != nil {
 		log.Println("spdy:", err)
 	}
 }
 
-// request represents a server request
-type request struct {
-	remoteAddr string
-	handler    http.Handler
-	stream     *framing.Stream
+// ServeConn serves incoming SPDY requests on c.
+// Most people don't need this; they should use
+// ListenAndServeTLS instead.
+func (s *Server) ServeConn(c net.Conn) error {
+	return framing.NewSession(c).Run(true, func(st *framing.Stream) {
+		s.serveStream(st, c)
+	})
 }
 
-// The server side of an http-over-spdy request.
-func (c *request) serve() {
+func (s *Server) serveStream(st *framing.Stream, c net.Conn) {
 	// TODO(kr): recover
 	// TODO(kr): buffered reader and writer
-	w, err := c.readRequest()
+	w, err := readRequest(st)
 	if err != nil {
 		log.Println("spdy: read request failed:", err)
-		c.stream.Reply(http.Header{":status": {"400"}}, framing.ControlFlagFin)
-		c.stream.Reset(framing.RefusedStream)
+		st.Reply(http.Header{":status": {"400"}}, framing.ControlFlagFin)
+		st.Reset(framing.RefusedStream)
 		return
 	}
-
-	handler := c.handler
+	w.req.RemoteAddr = c.RemoteAddr().String()
+	handler := s.Handler
 	if handler == nil {
 		handler = http.DefaultServeMux
 	}
@@ -70,29 +83,29 @@ func (c *request) serve() {
 	w.finishRequest()
 }
 
-func (c *request) readRequest() (w *response, err error) {
-	req, err := ReadRequest(
-		c.stream.Header(),
-		nil,
-		c.stream, // TODO(kr): buffer
-	)
-	if err != nil {
-		return nil, err
-	}
-	req.RemoteAddr = c.remoteAddr
-	w = new(response)
-	w.header = make(http.Header)
-	w.stream = c.stream
-	w.req = req
-	return w, nil
-}
-
+// This is our http.ResponseWriter.
 type response struct {
 	stream      *framing.Stream
 	req         *http.Request
 	header      http.Header
 	wroteHeader bool
 	finished    bool
+}
+
+func readRequest(st *framing.Stream) (w *response, err error) {
+	req, err := ReadRequest(
+		st.Header(),
+		nil,
+		st, // TODO(kr): buffer
+	)
+	if err != nil {
+		return nil, err
+	}
+	w = new(response)
+	w.header = make(http.Header)
+	w.stream = st
+	w.req = req
+	return w, nil
 }
 
 func (w *response) Write(p []byte) (int, error) {

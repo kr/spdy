@@ -2,7 +2,6 @@ package spdy
 
 import (
 	"bytes"
-	framing "github.com/kr/spdy/spdyframing"
 	"io"
 	"net"
 	"net/http"
@@ -20,11 +19,10 @@ func echoHandler(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func serveEcho(t *testing.T, h http.Handler, c net.Conn) {
-	err := framing.NewSession(c).Run(true, func(st *framing.Stream) {
-		r := &request{remoteAddr: "|client", handler: h, stream: st}
-		r.serve()
-	})
+func serveConn(t *testing.T, h http.Handler, c net.Conn) {
+	var s Server
+	s.Handler = h
+	err := s.ServeConn(c)
 	if err != nil {
 		t.Error("server unexpected err", err)
 	}
@@ -32,7 +30,7 @@ func serveEcho(t *testing.T, h http.Handler, c net.Conn) {
 
 func TestConnGet(t *testing.T) {
 	cconn, sconn := pipeConn()
-	go serveEcho(t, echoHandler(t), sconn)
+	go serveConn(t, echoHandler(t), sconn)
 
 	conn := NewConn(cconn)
 	conn.once.Do(func() {
