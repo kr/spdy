@@ -2,12 +2,9 @@ package spdy
 
 import (
 	"errors"
-	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -58,7 +55,7 @@ func ReadRequest(h, t http.Header, r io.Reader) (*http.Request, error) {
 
 	// TODO(kr): content length / limit reader?
 	if r == nil {
-		r = eofReadCloser
+		r = eofReader
 	}
 	if t != nil {
 		req.Body = &body{r: r, hdr: req, trailer: t}
@@ -68,10 +65,10 @@ func ReadRequest(h, t http.Header, r io.Reader) (*http.Request, error) {
 	return req, nil
 }
 
-// FramingHeader copies r into a header suitable for use in the SPDY framing
-// layer. It includes the SPDY-specific ':' fields such as :scheme, :method,
-// and :version.
-func FramingHeader(r *http.Request) http.Header {
+// RequestFramingHeader copies r into a header suitable for use in the SPDY
+// framing layer. It includes the SPDY-specific ':' fields such as :scheme,
+// :method, and :version.
+func RequestFramingHeader(r *http.Request) http.Header {
 	h := make(http.Header)
 	copyHeader(h, r.Header)
 	h.Set(":scheme", r.URL.Scheme)
@@ -81,96 +78,3 @@ func FramingHeader(r *http.Request) http.Header {
 	h.Set(":version", r.Proto)
 	return h
 }
-
-// body turns a Reader into a ReadCloser.
-// Close ensures that the body has been fully read
-// and then copies the trailer if necessary.
-// In spdy, every request is "closing"; there's
-// no such thing as a keepalive stream.
-type body struct {
-	r      io.Reader
-	closed bool
-
-	// non-nil (Response or Request) value means copy trailer
-	hdr interface{}
-
-	// contains trailer values to copy.
-	// will be filled in by the frame reader.
-	// should be considered incomplete until EOF.
-	trailer http.Header
-
-	res *response // response writer for server requests, else nil
-}
-
-func (b *body) Read(p []byte) (n int, err error) {
-	if b.closed {
-		return 0, http.ErrBodyReadAfterClose
-	}
-	n, err = b.r.Read(p)
-	if err == io.EOF && b.trailer != nil {
-		b.copyTrailer()
-		b.hdr = nil
-	}
-	return n, err
-}
-
-func (b *body) copyTrailer() {
-	if b.trailer == nil {
-		return
-	}
-	switch rr := b.hdr.(type) {
-	case *http.Request:
-		rr.Trailer = make(http.Header)
-		copyHeader(rr.Trailer, b.trailer)
-	case *http.Response:
-		rr.Trailer = make(http.Header)
-		copyHeader(rr.Trailer, b.trailer)
-	}
-	b.trailer = nil
-}
-
-func (b *body) Close() error {
-	if b.closed {
-		return nil
-	}
-	var err error
-	switch {
-	case b.hdr == nil:
-		// no trailer. no point in reading to EOF.
-	case false:
-		// TODO(kr): request body limit as in net/http
-	case b.r == eofReadCloser:
-		// Nothing to read. No need to io.Copy from it.
-	default:
-		// Fully consume the body, which will also lead to us reading
-		// the trailer headers after the body, if present.
-		_, err = io.Copy(ioutil.Discard, b)
-	}
-	b.closed = true
-	return err
-}
-
-// parseContentLength trims whitespace from cl and returns -1 if no value
-// is set, or the value if it's >= 0.
-func parseContentLength(cl string) (int64, error) {
-	cl = strings.TrimSpace(cl)
-	if cl == "" {
-		return -1, nil
-	}
-	n, err := strconv.ParseInt(cl, 10, 64)
-	if err != nil || n < 0 {
-		return 0, &badStringError{"bad Content-Length", cl}
-	}
-	return n, nil
-
-}
-
-type badStringError struct {
-	what string
-	str  string
-}
-
-func (e *badStringError) Error() string { return fmt.Sprintf("%s %q", e.what, e.str) }
-
-// eofReadCloser is a non-nil io.ReadCloser that always returns EOF.
-var eofReadCloser = ioutil.NopCloser(strings.NewReader(""))

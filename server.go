@@ -129,35 +129,7 @@ func (w *response) writeHeader(code int, fin bool) {
 		return
 	}
 	w.wroteHeader = true
-	// TODO(kr): enforce correct Content-Length
-	// TODO(kr): set FLAG_FIN if Content-Length is 0
-	if conn := w.header.Get("Connection"); conn != "" && conn != "close" {
-		log.Printf("spdy: invalid Connection set")
-	}
-	w.header.Del("Connection")
-	// TODO(kr): delete other spdy-prohibited header fields
-
-	if code == http.StatusNotModified {
-		// Must not have body.
-		// TODO(kr): enforce this
-	} else {
-		// TODO(kr): sniff
-		if ctyp := w.header.Get("Content-Type"); ctyp == "" {
-			w.header.Set("Content-Type", "text/plain")
-		}
-	}
-
-	// TODO(kr): set Date
-
-	h := make(http.Header)
-	copyHeader(h, w.header)
-	codestring := strconv.Itoa(code)
-	statusText := http.StatusText(code)
-	if statusText == "" {
-		statusText = "status code " + codestring
-	}
-	h.Set(":status", codestring+" "+statusText)
-	h.Set(":version", "HTTP/1.1")
+	h := w.framingHeader(code)
 	var flag framing.ControlFlags
 	if fin {
 		flag |= framing.ControlFlagFin
@@ -167,6 +139,39 @@ func (w *response) writeHeader(code int, fin bool) {
 		log.Println("spdy:", err)
 		w.stream.Reset(framing.InternalError)
 	}
+}
+
+func (w *response) framingHeader(code int) http.Header {
+	h := make(http.Header)
+	copyHeader(h, w.header)
+	// TODO(kr): enforce correct Content-Length
+	// TODO(kr): set FLAG_FIN if Content-Length is 0
+	if conn := h.Get("Connection"); conn != "" && conn != "close" {
+		log.Printf("spdy: invalid Connection set")
+	}
+
+	if code == http.StatusNotModified {
+		// Must not have body.
+		// TODO(kr): enforce this
+	} else {
+		// TODO(kr): sniff
+		if ctyp := h.Get("Content-Type"); ctyp == "" {
+			h.Set("Content-Type", "text/plain")
+		}
+	}
+
+	// TODO(kr): set Date
+
+	codestring := strconv.Itoa(code)
+	statusText := http.StatusText(code)
+	if statusText == "" {
+		statusText = "status code " + codestring
+	}
+	h.Set(":status", codestring+" "+statusText)
+	h.Set(":version", "HTTP/1.1")
+	h.Del("Connection")
+	// TODO(kr): delete other spdy-prohibited header fields
+	return h
 }
 
 func (w *response) Header() http.Header {

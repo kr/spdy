@@ -40,7 +40,7 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.ContentLength == 0 {
 		flag |= framing.ControlFlagFin
 	}
-	st, err := c.s.Open(FramingHeader(r), flag)
+	st, err := c.s.Open(RequestFramingHeader(r), flag)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 		go io.Copy(st, body) // TODO(kr): handle errors
 	}
 	h := st.Header() // waits for SYN_REPLY
-	resp, err := ReadResponse(h, nil, st)
+	resp, err := ReadResponse(h, nil, st, r)
 	if err != nil {
 		st.Reset(framing.ProtocolError)
 		return nil, err

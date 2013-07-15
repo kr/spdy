@@ -48,11 +48,15 @@ func TestConnGet(t *testing.T) {
 	}
 	respBody := resp.Body
 	resp.Body = nil
-	//respReq := resp.Request
 	resp.Request = nil
 	wantResp := &http.Response{
-		Status:     "200 OK",
-		StatusCode: 200,
+		Status:        "200 OK",
+		StatusCode:    200,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Close:         true,
+		ContentLength: -1,
 		Header: http.Header{
 			"Content-Type": {"text/plain"},
 		},
