@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -109,9 +108,8 @@ func TestConnPostShortBody(t *testing.T) {
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Close:         true,
-		ContentLength: int64(len(shortBody)),
+		ContentLength: -1,
 		Header: http.Header{
-			"Content-Length": {strconv.Itoa(len(shortBody))},
 			"Content-Type": {"text/css"},
 		},
 	}
