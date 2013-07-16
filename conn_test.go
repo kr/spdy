@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
@@ -78,9 +77,7 @@ func TestConnGet(t *testing.T) {
 	}
 }
 
-const shortBody = "hello"
-
-func TestConnPostShortBody(t *testing.T) {
+func testConnPostSize(t *testing.T, size int) {
 	cconn, sconn := pipeConn()
 	go serveConn(t, echoHandler(t), sconn)
 
@@ -93,12 +90,23 @@ func TestConnPostShortBody(t *testing.T) {
 			}
 		}()
 	})
+	var buf = make([]byte, size)
+	for i := range buf {
+		buf[i] = 'a'
+	}
 	client := &http.Client{Transport: conn}
-	resp, err := client.Post("http://example.com/", "text/plain", strings.NewReader(shortBody))
+	resp, err := client.Post("http://example.com/", "text/plain", bytes.NewBuffer(buf))
 	if err != nil {
 		t.Fatal("unexpected err", err)
 	}
-	respBody := resp.Body
+	var bout bytes.Buffer
+	if resp.Body != nil {
+		_, err := io.Copy(&bout, resp.Body)
+		if err != nil {
+			t.Fatalf("#%d. copying body: %v", err)
+		}
+		resp.Body.Close()
+	}
 	resp.Body = nil
 	resp.Request = nil
 	wantResp := &http.Response{
@@ -114,18 +122,17 @@ func TestConnPostShortBody(t *testing.T) {
 		},
 	}
 	diff(t, "Response", resp, wantResp)
-	var bout bytes.Buffer
-	if respBody != nil {
-		_, err := io.Copy(&bout, respBody)
-		if err != nil {
-			t.Fatalf("#%d. copying body: %v", err)
-		}
-		respBody.Close()
-	}
-	const wantBody = shortBody
+	wantBody := string(buf)
 	gotBody := bout.String()
 	if gotBody != wantBody {
 		t.Errorf("Body = %q want %q", gotBody, wantBody)
+	}
+}
+
+func TestConnPostSizes(t *testing.T) {
+	for i := 0; i < 128*1024; i += i/2 + 1 {
+		t.Log("size %d", i)
+		testConnPostSize(t, i)
 	}
 }
 
