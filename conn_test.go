@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,6 +73,58 @@ func TestConnGet(t *testing.T) {
 		respBody.Close()
 	}
 	const wantBody = ""
+	gotBody := bout.String()
+	if gotBody != wantBody {
+		t.Errorf("Body = %q want %q", gotBody, wantBody)
+	}
+}
+
+const shortBody = "hello"
+
+func TestConnPostShortBody(t *testing.T) {
+	cconn, sconn := pipeConn()
+	go serveConn(t, echoHandler(t), sconn)
+
+	conn := NewConn(cconn)
+	conn.once.Do(func() {
+		go func() {
+			err := conn.s.Run(false, nil)
+			if err != nil {
+				t.Error("client unexpected err", err)
+			}
+		}()
+	})
+	client := &http.Client{Transport: conn}
+	resp, err := client.Post("http://example.com/", "text/css", strings.NewReader(shortBody))
+	if err != nil {
+		t.Fatal("unexpected err", err)
+	}
+	respBody := resp.Body
+	resp.Body = nil
+	resp.Request = nil
+	wantResp := &http.Response{
+		Status:        "200 OK",
+		StatusCode:    200,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Close:         true,
+		ContentLength: int64(len(shortBody)),
+		Header: http.Header{
+			"Content-Length": {strconv.Itoa(len(shortBody))},
+			"Content-Type": {"text/css"},
+		},
+	}
+	diff(t, "Response", resp, wantResp)
+	var bout bytes.Buffer
+	if respBody != nil {
+		_, err := io.Copy(&bout, respBody)
+		if err != nil {
+			t.Fatalf("#%d. copying body: %v", err)
+		}
+		respBody.Close()
+	}
+	const wantBody = shortBody
 	gotBody := bout.String()
 	if gotBody != wantBody {
 		t.Errorf("Body = %q want %q", gotBody, wantBody)
