@@ -94,7 +94,7 @@ func TestConnPostShortBody(t *testing.T) {
 		}()
 	})
 	client := &http.Client{Transport: conn}
-	resp, err := client.Post("http://example.com/", "text/css", strings.NewReader(shortBody))
+	resp, err := client.Post("http://example.com/", "text/plain", strings.NewReader(shortBody))
 	if err != nil {
 		t.Fatal("unexpected err", err)
 	}
@@ -110,7 +110,7 @@ func TestConnPostShortBody(t *testing.T) {
 		Close:         true,
 		ContentLength: -1,
 		Header: http.Header{
-			"Content-Type": {"text/css"},
+			"Content-Type": {"text/plain"},
 		},
 	}
 	diff(t, "Response", resp, wantResp)
