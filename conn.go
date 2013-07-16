@@ -45,7 +45,10 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	if r.ContentLength > 0 && body != nil {
-		go io.Copy(st, body) // TODO(kr): handle errors
+		go func() {
+			io.Copy(st, body) // TODO(kr): handle errors
+			st.Close()
+		}()
 	}
 	h := st.Header() // waits for SYN_REPLY
 	resp, err := ReadResponse(h, nil, st, r)
