@@ -32,15 +32,7 @@ func TestConnGet(t *testing.T) {
 	cconn, sconn := pipeConn()
 	go serveConn(t, echoHandler(t), sconn)
 
-	conn := NewConn(cconn)
-	conn.once.Do(func() {
-		go func() {
-			err := conn.s.Run(false, nil)
-			if err != nil {
-				t.Error("client unexpected err", err)
-			}
-		}()
-	})
+	conn := &Conn{Conn: cconn}
 	client := &http.Client{Transport: conn}
 	resp, err := client.Get("http://example.com/")
 	if err != nil {
@@ -81,15 +73,7 @@ func testConnPostSize(t *testing.T, size int) {
 	cconn, sconn := pipeConn()
 	go serveConn(t, echoHandler(t), sconn)
 
-	conn := NewConn(cconn)
-	conn.once.Do(func() {
-		go func() {
-			err := conn.s.Run(false, nil)
-			if err != nil {
-				t.Error("client unexpected err", err)
-			}
-		}()
-	})
+	conn := &Conn{Conn: cconn}
 	var buf = make([]byte, size)
 	for i := range buf {
 		buf[i] = 'a'

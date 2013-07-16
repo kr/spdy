@@ -14,34 +14,34 @@ var bufferReadTests = []struct {
 	wbuf     buffer
 }{
 	{
-		buffer{[]byte{'a', 0}, 0, 1, false},
+		buffer{[]byte{'a', 0}, 0, 1, false, nil},
 		5, 1, nil, []byte{'a'},
-		buffer{[]byte{'a', 0}, 1, 1, false},
+		buffer{[]byte{'a', 0}, 1, 1, false, nil},
 	},
 	{
-		buffer{[]byte{'a', 0}, 0, 1, true},
+		buffer{[]byte{'a', 0}, 0, 1, true, io.EOF},
 		5, 1, io.EOF, []byte{'a'},
-		buffer{[]byte{'a', 0}, 1, 1, true},
+		buffer{[]byte{'a', 0}, 1, 1, true, io.EOF},
 	},
 	{
-		buffer{[]byte{0, 'a'}, 1, 2, false},
+		buffer{[]byte{0, 'a'}, 1, 2, false, nil},
 		5, 1, nil, []byte{'a'},
-		buffer{[]byte{0, 'a'}, 2, 2, false},
+		buffer{[]byte{0, 'a'}, 2, 2, false, nil},
 	},
 	{
-		buffer{[]byte{0, 'a'}, 1, 2, true},
+		buffer{[]byte{0, 'a'}, 1, 2, true, io.EOF},
 		5, 1, io.EOF, []byte{'a'},
-		buffer{[]byte{0, 'a'}, 2, 2, true},
+		buffer{[]byte{0, 'a'}, 2, 2, true, io.EOF},
 	},
 	{
-		buffer{[]byte{}, 0, 0, false},
+		buffer{[]byte{}, 0, 0, false, nil},
 		5, 0, errReadEmpty, []byte{},
-		buffer{[]byte{}, 0, 0, false},
+		buffer{[]byte{}, 0, 0, false, nil},
 	},
 	{
-		buffer{[]byte{}, 0, 0, true},
+		buffer{[]byte{}, 0, 0, true, io.EOF},
 		5, 0, io.EOF, []byte{},
-		buffer{[]byte{}, 0, 0, true},
+		buffer{[]byte{}, 0, 0, true, io.EOF},
 	},
 }
 

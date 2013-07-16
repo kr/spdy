@@ -12,12 +12,13 @@ import (
 var sessionTests = []struct {
 	handler     func(*testing.T, *Stream) error
 	frames      []Frame // even index means client->server; odd the reverse
-	wRunErr     error   // wanted return value from Session.Run
+	wSessErr    error   // wanted return value from Session.Run
 	wHandlerErr []bool  // wanted errors from handler
 }{
 	{
-		handler: failHandler,
-		frames:  []Frame{},
+		handler:  failHandler,
+		frames:   []Frame{},
+		wSessErr: io.EOF,
 	},
 	{
 		handler: echoHandler,
@@ -38,6 +39,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
+		wSessErr:    io.EOF,
 		wHandlerErr: []bool{false},
 	},
 	{
@@ -72,6 +74,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
+		wSessErr:    io.EOF,
 		wHandlerErr: []bool{false},
 	},
 	{
@@ -129,6 +132,7 @@ var sessionTests = []struct {
 				Data:     []byte{},
 			},
 		},
+		wSessErr:    io.EOF,
 		wHandlerErr: []bool{false},
 	},
 	{
@@ -137,6 +141,7 @@ var sessionTests = []struct {
 			&PingFrame{Id: 1},
 			&PingFrame{Id: 1},
 		},
+		wSessErr: io.EOF,
 	},
 	{
 		handler: failHandler,
@@ -144,6 +149,7 @@ var sessionTests = []struct {
 			&DataFrame{StreamId: 1, Flags: DataFlagFin},
 			&RstStreamFrame{StreamId: 1, Status: InvalidStream},
 		},
+		wSessErr: io.EOF,
 	},
 	{
 		handler: echoHandler,
@@ -165,6 +171,7 @@ var sessionTests = []struct {
 				Status:   FlowControlError,
 			},
 		},
+		wSessErr:    io.EOF,
 		wHandlerErr: []bool{true},
 	},
 	{
@@ -180,11 +187,6 @@ var sessionTests = []struct {
 			},
 			&WindowUpdateFrame{
 				StreamId:        1,
-				DeltaWindowSize: 1<<31 - 1, // valid
-			},
-			nil,
-			&WindowUpdateFrame{
-				StreamId:        1,
 				DeltaWindowSize: 1<<31 - 1, // valid, but total invalid
 			},
 			&RstStreamFrame{
@@ -192,6 +194,7 @@ var sessionTests = []struct {
 				Status:   FlowControlError,
 			},
 		},
+		wSessErr:    io.EOF,
 		wHandlerErr: []bool{true},
 	},
 }
@@ -221,24 +224,21 @@ func TestSessionServer(t *testing.T) {
 	for i, tt := range sessionTests {
 		c, s := pipeConn()
 		hErr := make(chan error, 100)
-		handler := func(st *Stream) { hErr <- tt.handler(t, st) }
-		sess := NewSession(s)
-		errCh := make(chan error)
-		go func() { errCh <- sess.Run(true, handler) }()
-
-		fr := NewFramer(c, c)
+		sfr := NewFramer(s, s)
+		sess := Start(sfr, true, func(st *Stream) { hErr <- tt.handler(t, st) })
+		cfr := NewFramer(c, c)
 		for j, f := range tt.frames {
 			if f == nil {
 				continue
 			}
 			if j%2 == 0 {
-				err := fr.WriteFrame(f)
+				err := cfr.WriteFrame(f)
 				if err != nil {
 					t.Errorf("#%d: write frame: %v", i, err)
 					return
 				}
 			} else {
-				gf, err := fr.ReadFrame()
+				gf, err := cfr.ReadFrame()
 				if err != nil {
 					t.Errorf("#%d: read frame %d: %v", i, j, err)
 					break
@@ -247,9 +247,10 @@ func TestSessionServer(t *testing.T) {
 			}
 		}
 		c.Close()
-		if err := <-errCh; err != tt.wRunErr {
-			t.Errorf("#%d: Run err = %v want %v", i, err, tt.wRunErr)
+		if err := sess.Wait(); err != tt.wSessErr {
+			t.Errorf("#%d: Run err = %v want %v", i, err, tt.wSessErr)
 		}
+		s.Close()
 		for j, w := range tt.wHandlerErr {
 			if g := <-hErr; (g != nil) != w {
 				s := "nil"
@@ -281,16 +282,16 @@ func TestSessionClient(t *testing.T) {
 	cpipe, spipe := pipeConn()
 	defer cpipe.Close()
 	defer spipe.Close()
-	fr := NewFramer(spipe, spipe)
+	sfr := NewFramer(spipe, spipe)
 	go func() {
 		var fs []Frame
-		f, err := fr.ReadFrame()
+		f, err := sfr.ReadFrame()
 		if err != nil {
 			t.Fatal(err)
 		}
 		fs = append(fs, f)
 		for {
-			f, err := fr.ReadFrame()
+			f, err := sfr.ReadFrame()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -302,14 +303,14 @@ func TestSessionClient(t *testing.T) {
 		}
 		go io.Copy(ioutil.Discard, spipe)
 		for _, f := range reply {
-			err := fr.WriteFrame(f)
+			err := sfr.WriteFrame(f)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 	}()
-	sess := NewSession(cpipe)
-	go sess.Run(false, func(st *Stream) { failHandler(t, st) })
+	cfr := NewFramer(cpipe, cpipe)
+	sess := Start(cfr, false, func(st *Stream) { failHandler(t, st) })
 	h := http.Header{"X": {"y"}}
 	st, err := sess.Open(h, 0)
 	if err != nil {
@@ -358,16 +359,16 @@ func TestSessionUnidirectional(t *testing.T) {
 	cpipe, spipe := pipeConn()
 	defer cpipe.Close()
 	defer spipe.Close()
-	fr := NewFramer(spipe, spipe)
+	sfr := NewFramer(spipe, spipe)
 	go func() {
 		var fs []Frame
-		f, err := fr.ReadFrame()
+		f, err := sfr.ReadFrame()
 		if err != nil {
 			t.Fatal(err)
 		}
 		fs = append(fs, f)
 		for {
-			f, err := fr.ReadFrame()
+			f, err := sfr.ReadFrame()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -379,8 +380,8 @@ func TestSessionUnidirectional(t *testing.T) {
 		}
 		io.Copy(ioutil.Discard, spipe)
 	}()
-	sess := NewSession(cpipe)
-	go sess.Run(false, func(st *Stream) { failHandler(t, st) })
+	cfr := NewFramer(cpipe, cpipe)
+	sess := Start(cfr, false, func(st *Stream) { failHandler(t, st) })
 	st, err := sess.Open(http.Header{"X": {"y"}}, flags)
 	if err != nil {
 		t.Fatal(err)

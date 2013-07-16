@@ -59,9 +59,12 @@ func (s *Server) serveConn(hs *http.Server, c *tls.Conn, h http.Handler) {
 // Most people don't need this; they should use
 // ListenAndServeTLS instead.
 func (s *Server) ServeConn(c net.Conn) error {
-	return framing.NewSession(c).Run(true, func(st *framing.Stream) {
+	defer c.Close()
+	fr := framing.NewFramer(c, c)
+	sess := framing.Start(fr, true, func(st *framing.Stream) {
 		s.serveStream(st, c)
 	})
+	return sess.Wait()
 }
 
 func (s *Server) serveStream(st *framing.Stream, c net.Conn) {

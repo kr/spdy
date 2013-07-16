@@ -2,7 +2,6 @@ package spdyframing
 
 import (
 	"errors"
-	"io"
 )
 
 // buffer is an io.ReadWriteCloser backed by a fixed size buffer.
@@ -11,12 +10,12 @@ type buffer struct {
 	buf    []byte
 	r, w   int
 	closed bool
+	err    error // err to return to reader
 }
-
-var _ io.ReadWriteCloser = (*buffer)(nil)
 
 var (
 	errReadEmpty = errors.New("read from empty buffer")
+	errWriteFull = errors.New("write on full buffer")
 )
 
 // Read copies bytes from the buffer into p.
@@ -25,7 +24,7 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	n = copy(p, b.buf[b.r:b.w])
 	b.r += n
 	if b.closed && b.r == b.w {
-		err = io.EOF
+		err = b.err
 	} else if b.r == b.w && n == 0 {
 		err = errReadEmpty
 	}
@@ -55,15 +54,17 @@ func (b *buffer) Write(p []byte) (n int, err error) {
 	n = copy(b.buf[b.w:], p)
 	b.w += n
 	if n < len(p) {
-		err = errors.New("write on full buffer")
+		err = errWriteFull
 	}
 	return n, err
 }
 
 // Close marks the buffer as closed. Future calls to Write will
 // return an error. Future calls to Read, once the buffer is
-// empty, will return io.EOF.
-func (b *buffer) Close() error {
-	b.closed = true
-	return nil
+// empty, will return err.
+func (b *buffer) Close(err error) {
+	if !b.closed {
+		b.closed = true
+		b.err = err
+	}
 }

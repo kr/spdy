@@ -11,28 +11,20 @@ import (
 // Conn represents a SPDY client connection.
 // It implements http.RoundTripper for making HTTP requests.
 type Conn struct {
-	c    net.Conn
+	Conn net.Conn
 	s    *framing.Session
 	once sync.Once
-}
-
-// NewConn returns a new connection for making requests on c.
-func NewConn(c net.Conn) *Conn {
-	return &Conn{c: c, s: framing.NewSession(c)}
-}
-
-// Will be called in a separate goroutine for each incoming
-// server-push stream.
-func (c *Conn) handlePush(st *framing.Stream) {
-	// TODO(kr):  Associate st with its request and
-	//            make it available to the user.
-	st.Reset(framing.RefusedStream)
 }
 
 // RoundTrip implements interface http.RoundTripper.
 func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 	c.once.Do(func() {
-		go c.s.Run(false, c.handlePush) // TODO(kr): handle errors
+		fr := framing.NewFramer(c.Conn, c.Conn)
+		c.s = framing.Start(fr, false, func(s *framing.Stream) {
+			// TODO(kr): Make each stream available
+			//           to its associated request.
+			s.Reset(framing.RefusedStream)
+		})
 	})
 	body := r.Body
 	r.Body = nil
@@ -46,7 +38,11 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	if r.ContentLength > 0 && body != nil {
 		go func() {
-			io.Copy(st, body) // TODO(kr): handle errors
+			// TODO(kr): handle errors
+			_, err := io.Copy(st, body)
+			if err != nil {
+				return
+			}
 			st.Close()
 		}()
 	}
