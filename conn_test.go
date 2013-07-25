@@ -120,6 +120,56 @@ func TestConnPostSizes(t *testing.T) {
 	}
 }
 
+func TestConnGetBodyUnknownLen(t *testing.T) {
+	cconn, sconn := pipeConn()
+	go serveConn(t, echoHandler(t), sconn)
+
+	conn := &Conn{Conn: cconn}
+	var buf = make([]byte, 100)
+	for i := range buf {
+		buf[i] = 'a'
+	}
+	client := &http.Client{Transport: conn}
+	req, err := http.NewRequest("GET", "http://example.com/", bytes.NewBuffer(buf))
+	req.Header.Set("Content-Type", "text/plain")
+
+	// for outgoing request, 0 means unknown len if Body is not nil
+	req.ContentLength = 0
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal("unexpected err", err)
+	}
+	var bout bytes.Buffer
+	if resp.Body != nil {
+		_, err := io.Copy(&bout, resp.Body)
+		if err != nil {
+			t.Fatalf("#%d. copying body: %v", err)
+		}
+		resp.Body.Close()
+	}
+	resp.Body = nil
+	resp.Request = nil
+	wantResp := &http.Response{
+		Status:        "200 OK",
+		StatusCode:    200,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Close:         true,
+		ContentLength: -1,
+		Header: http.Header{
+			"Content-Type": {"text/plain"},
+		},
+	}
+	diff(t, "Response", resp, wantResp)
+	wantBody := string(buf)
+	gotBody := bout.String()
+	if gotBody != wantBody {
+		t.Errorf("Body = %q want %q", gotBody, wantBody)
+	}
+}
+
 type side struct {
 	*io.PipeReader
 	*io.PipeWriter

@@ -29,7 +29,7 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 	body := r.Body
 	r.Body = nil
 	var flag framing.ControlFlags
-	if r.ContentLength == 0 {
+	if r.ContentLength == 0 && body == nil {
 		flag |= framing.ControlFlagFin
 	}
 	st, err := c.s.Open(RequestFramingHeader(r), flag)
