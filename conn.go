@@ -36,7 +36,7 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.ContentLength > 0 && body != nil {
+	if body != nil {
 		go func() {
 			// TODO(kr): handle errors
 			_, err := io.Copy(st, body)
