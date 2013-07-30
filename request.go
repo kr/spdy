@@ -24,9 +24,10 @@ func ReadRequest(h, t http.Header, r io.Reader) (*http.Request, error) {
 		return nil, errors.New("invalid path: " + path)
 	}
 	req.URL = &url.URL{
-		Scheme: h.Get(":scheme"),
-		Path:   path,
-		Host:   h.Get(":host"),
+		Scheme: 	h.Get(":scheme"),
+		Path:   	path,
+		Host:   	h.Get(":host"),
+		RawQuery:	h.Get(":query"),
 	}
 	req.Close = true
 	req.Method = h.Get(":method")
@@ -76,5 +77,6 @@ func RequestFramingHeader(r *http.Request) http.Header {
 	h.Set(":method", r.Method)
 	h.Set(":path", r.URL.Path)
 	h.Set(":version", r.Proto)
+	h.Set(":query", r.URL.RawQuery)
 	return h
 }
