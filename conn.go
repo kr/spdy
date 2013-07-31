@@ -26,13 +26,13 @@ func (c *Conn) RoundTrip(r *http.Request) (*http.Response, error) {
 			s.Reset(framing.RefusedStream)
 		})
 	})
+	reqHeader, flag, err := RequestFramingHeader(r)
 	body := r.Body
 	r.Body = nil
-	var flag framing.ControlFlags
-	if r.ContentLength == 0 && body == nil {
-		flag |= framing.ControlFlagFin
+	if err != nil {
+		return nil, err
 	}
-	st, err := c.s.Open(RequestFramingHeader(r), flag)
+	st, err := c.s.Open(reqHeader, flag)
 	if err != nil {
 		return nil, err
 	}

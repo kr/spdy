@@ -2,10 +2,14 @@ package spdy
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+
+	framing "github.com/kr/spdy/spdyframing"
 )
 
 // ReadRequest reads an HTTP request. The header is taken from h,
@@ -68,13 +72,47 @@ func ReadRequest(h, t http.Header, r io.Reader) (*http.Request, error) {
 // RequestFramingHeader copies r into a header suitable for use in the SPDY
 // framing layer. It includes the SPDY-specific ':' fields such as :scheme,
 // :method, and :version.
-func RequestFramingHeader(r *http.Request) http.Header {
+func RequestFramingHeader(r *http.Request) (http.Header, framing.ControlFlags, error) {
+	if r.ContentLength > 0 && r.Body == nil {
+		return nil, 0, fmt.Errorf("http: Request.ContentLength=%d with nil Body", r.ContentLength)
+	}
 	h := make(http.Header)
-	copyHeader(h, r.Header)
-	h.Set(":scheme", r.URL.Scheme)
-	h.Set(":host", r.URL.Host)
+	for k, vv := range r.Header {
+		if len(k) > 0 && k[0] != ':' && len(vv) > 0 {
+			h[k] = vv
+		}
+	}
+	if _, ok := h["User-Agent"]; !ok {
+		h.Set("User-Agent", "github.com/kr/spdy")
+	}
 	h.Set(":method", r.Method)
-	h.Set(":path", r.URL.Path)
-	h.Set(":version", r.Proto)
-	return h
+	h.Set(":path", r.URL.RequestURI())
+	scheme := r.URL.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	h.Set(":scheme", scheme)
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	h.Set(":host", host)
+	proto := r.Proto
+	if proto == "" {
+		proto = "HTTP/1.1"
+	}
+	h.Set(":version", proto)
+	if r.ContentLength > 0 {
+		h.Set("Content-Length", strconv.FormatInt(r.ContentLength, 10))
+	} else if r.Method == "POST" && r.Body == nil {
+		h.Set("Content-Length", "0")
+	}
+	for _, s := range badReqHeaderFields {
+		delete(h, s)
+	}
+	var flag framing.ControlFlags
+	if r.Body == nil {
+		flag = framing.ControlFlagFin
+	}
+	return h, flag, nil
 }

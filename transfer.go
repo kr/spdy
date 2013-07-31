@@ -9,13 +9,23 @@ import (
 	"strings"
 )
 
+// SPDY 3 prohibits these fields.
 // must be in canonicalized form
-var badRespHeaderFields = []string{
-	"Connection",
-	"Keep-Alive",
-	"Proxy-Connection",
-	"Transfer-Encoding",
-}
+var (
+	badRespHeaderFields = []string{
+		"Connection",
+		"Keep-Alive",
+		"Proxy-Connection",
+		"Transfer-Encoding",
+	}
+	badReqHeaderFields = []string{
+		"Connection",
+		"Host",
+		"Keep-Alive",
+		"Proxy-Connection",
+		"Transfer-Encoding",
+	}
+)
 
 func noBodyExpected(requestMethod string) bool {
 	return requestMethod == "HEAD"

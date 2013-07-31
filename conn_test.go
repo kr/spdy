@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -51,6 +52,7 @@ func TestConnGet(t *testing.T) {
 		ContentLength: -1,
 		Header: http.Header{
 			"Content-Type": {"text/plain"},
+			"User-Agent":   {"github.com/kr/spdy"},
 		},
 	}
 	diff(t, "Response", resp, wantResp)
@@ -100,10 +102,16 @@ func testConnPostSize(t *testing.T, size int) {
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Close:         true,
-		ContentLength: -1,
+		ContentLength: int64(size),
 		Header: http.Header{
 			"Content-Type": {"text/plain"},
+			"User-Agent":   {"github.com/kr/spdy"},
 		},
+	}
+	if size > 0 {
+		wantResp.Header["Content-Length"] = []string{strconv.Itoa(size)}
+	} else {
+		wantResp.ContentLength = -1
 	}
 	diff(t, "Response", resp, wantResp)
 	wantBody := string(buf)
@@ -115,7 +123,7 @@ func testConnPostSize(t *testing.T, size int) {
 
 func TestConnPostSizes(t *testing.T) {
 	for i := 0; i < 128*1024; i += i/2 + 1 {
-		t.Log("size %d", i)
+		t.Log("size", i)
 		testConnPostSize(t, i)
 	}
 }
@@ -160,6 +168,7 @@ func TestConnGetBodyUnknownLen(t *testing.T) {
 		ContentLength: -1,
 		Header: http.Header{
 			"Content-Type": {"text/plain"},
+			"User-Agent":   {"github.com/kr/spdy"},
 		},
 	}
 	diff(t, "Response", resp, wantResp)
