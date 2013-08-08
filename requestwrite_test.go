@@ -370,6 +370,33 @@ var reqWriteTests = []reqWriteTest{
 			"ALL-CAPS":   {"x"},
 		},
 	},
+
+	// Query params go in :path.
+	{
+		Req: http.Request{
+			Method: "GET",
+			URL: &url.URL{
+				Scheme:   "http",
+				Host:     "www.google.com",
+				Path:     "/search",
+				RawQuery: "q=dogs",
+			},
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header:     http.Header{},
+		},
+
+		WantFlag: framing.ControlFlagFin,
+		WantHeader: http.Header{
+			":scheme":    {"http"},
+			":host":      {"www.google.com"},
+			":method":    {"GET"},
+			":path":      {"/search?q=dogs"},
+			":version":   {"HTTP/1.1"},
+			"User-Agent": {"github.com/kr/spdy"},
+		},
+	},
 }
 
 func TestRequestWrite(t *testing.T) {
